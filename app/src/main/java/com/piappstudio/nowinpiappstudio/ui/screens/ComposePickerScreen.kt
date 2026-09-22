@@ -43,12 +43,21 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
+// Data class representing a parsed Contact with selected details.
+data class Contact(
+    val lookupKey: String,
+    val name: String,
+    val emails: List<String>,
+    val phones: List<String>
+)
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ContactPickerScreen(onBack: () -> Unit) {
     val context = LocalContext.current
     var selectedName by remember { mutableStateOf<String?>(null) }
     var selectedPhone by remember { mutableStateOf<String?>(null) }
+    var selectedContacts by remember { mutableStateOf<List<Contact>>(emptyList()) }
 
     // 1. Launcher to pick a SPECIFIC Phone Number directly from system UI
     val phonePickerLauncher = rememberLauncherForActivityResult(
@@ -95,13 +104,6 @@ fun ContactPickerScreen(onBack: () -> Unit) {
 
 
     // [START android_contact_picker_result_uri_processing]
-// Data class representing a parsed Contact with selected details.
-    data class Contact(
-        val lookupKey: String,
-        val name: String,
-        val emails: List<String>,
-        val phones: List<String>
-    )
 
     // Helper function to query the content resolver with the URI returned by the Contact Picker.
 // Parses the cursor to extract contact details such as name, email, and phone number.
@@ -171,8 +173,9 @@ fun ContactPickerScreen(onBack: () -> Unit) {
                 coroutine.launch {
                     val contacts = processContactPickerResultUri(resultUri, context)
                     coroutine.launch(Dispatchers.Main) {
+                        selectedContacts = contacts
                         selectedName = contacts.joinToString { it.name }
-                        selectedPhone = contacts.joinToString { it.phones.toString() }
+                        selectedPhone = contacts.flatMap { it.phones }.joinToString()
                     }
                 }
             }
@@ -223,6 +226,36 @@ fun ContactPickerScreen(onBack: () -> Unit) {
                 Text("Pick Phone Number")
             }
 
+            // Option D: Opens multiple contacts picker (Android 17+)
+            Button(
+                modifier = Modifier.fillMaxWidth(),
+                onClick = {
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.CINNAMON_BUN) {
+                        val requestedFields = arrayListOf(
+                            ContactsContract.CommonDataKinds.Phone.CONTENT_ITEM_TYPE,
+                            ContactsContract.CommonDataKinds.StructuredName.CONTENT_ITEM_TYPE
+                        )
+                        val pickMultipleIntent = Intent(ACTION_PICK_CONTACTS).apply {
+                            putExtra(EXTRA_USE_SYSTEM_CONTACTS_PICKER, true)
+                            putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true)
+                            putStringArrayListExtra(
+                                EXTRA_PICK_CONTACTS_REQUESTED_DATA_FIELDS,
+                                requestedFields
+                            )
+                        }
+                        pickContact.launch(pickMultipleIntent)
+                    } else {
+                        // Fallback: Use standard single contact picker
+                        val intent = Intent(Intent.ACTION_PICK).apply {
+                            type = ContactsContract.CommonDataKinds.Phone.CONTENT_TYPE
+                        }
+                        phonePickerLauncher.launch(intent)
+                    }
+                }
+            ) {
+                Text("Pick Multiple Contact")
+            }
+
             Spacer(modifier = Modifier.height(12.dp))
 
             // Option B: Opens full contact picker
@@ -266,7 +299,42 @@ fun ContactPickerScreen(onBack: () -> Unit) {
 
             Spacer(modifier = Modifier.height(32.dp))
 
-            if (selectedName != null || selectedPhone != null) {
+            if (selectedContacts.isNotEmpty()) {
+                Text(
+                    text = "Picked Contacts List",
+                    style = MaterialTheme.typography.titleMedium,
+                    modifier = Modifier.padding(vertical = 8.dp)
+                )
+                selectedContacts.forEach { contact ->
+                    Card(
+                        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                        shape = MaterialTheme.shapes.medium,
+                        colors = CardDefaults.cardColors(
+                            containerColor = MaterialTheme.colorScheme.secondaryContainer
+                        )
+                    ) {
+                        Column(modifier = Modifier.padding(16.dp)) {
+                            Text(
+                                text = "Name: ${contact.name}",
+                                style = MaterialTheme.typography.bodyLarge,
+                                color = MaterialTheme.colorScheme.onSecondaryContainer
+                            )
+                            if (contact.phones.isNotEmpty()) {
+                                Text(
+                                    text = "Phone: ${contact.phones.joinToString()}",
+                                    style = MaterialTheme.typography.bodyMedium
+                                )
+                            }
+                            if (contact.emails.isNotEmpty()) {
+                                Text(
+                                    text = "Email: ${contact.emails.joinToString()}",
+                                    style = MaterialTheme.typography.bodyMedium
+                                )
+                            }
+                        }
+                    }
+                }
+            } else if (selectedName != null || selectedPhone != null) {
                 Card(
                     modifier = Modifier.fillMaxWidth(),
                     shape = MaterialTheme.shapes.medium,
